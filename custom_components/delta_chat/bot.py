@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections import OrderedDict
 from collections.abc import Callable
+from dataclasses import dataclass
 from os import makedirs, path
 from threading import Condition, Thread
 from typing import Any
@@ -51,11 +52,19 @@ class DeltaChatClient:
     """
 
     def __init__(
-        self, data_dir: str, on_died: Callable[[], None] | None = None
+        self,
+        data_dir: str,
+        on_died: Callable[[], None] | None = None,
+        on_joined: Callable[[Contact], None] | None = None,
     ) -> None:
-        """Client constructor."""
+        """Client constructor.
+
+        on_died is called when the core stops unexpectedly, and on_joined when
+        someone joins the bot with its invite. Both run in the event thread.
+        """
         self.data_dir = data_dir
         self._on_died = on_died
+        self._on_joined = on_joined
         self._transport: _Transport | None = None
         self.rpc: Rpc
         self._closing = False
@@ -118,6 +127,14 @@ class DeltaChatClient:
                     self._results_cond.notify_all()
             elif kind == "SecurejoinInviterProgress" and event.progress == 1000:
                 _LOGGER.info("A new contact joined the bot")
+                if self._on_joined is not None:
+                    try:
+                        contact = self.rpc.get_contact(
+                            raw_event.context_id, event.contact_id
+                        )
+                        self._on_joined(_to_contact(contact))
+                    except Exception:
+                        _LOGGER.exception("Error handling a new contact")
             elif kind == "Warning":
                 _LOGGER.debug("Delta Chat core: %s", event.msg)
             elif kind == "Error":
@@ -184,6 +201,10 @@ class DeltaChatClient:
     def _get_addresses(self, account_id: int) -> list[str]:
         return [params["addr"] for params in self.rpc.list_transports(account_id)]
 
+    def get_contacts(self, account_id: int) -> list[Contact]:
+        """Return the bot's contacts, such as people who joined with its invite."""
+        return [_to_contact(c) for c in self.rpc.get_contacts(account_id, 0, "")]
+
     def send_message(
         self, account_id: int, target: str, text: str, timeout: float
     ) -> None:
@@ -219,6 +240,18 @@ class DeltaChatClient:
         if result == EVENT_MSG_FAILED:
             error = self.rpc.get_message(account_id, msg_id).error
             raise SendFailed(f"Sending to {target} failed: {error or 'unknown error'}")
+
+
+@dataclass(frozen=True)
+class Contact:
+    """A Delta Chat contact."""
+
+    address: str
+    name: str
+
+
+def _to_contact(contact: Any) -> Contact:
+    return Contact(contact.address, contact.display_name)
 
 
 class ContactNotFound(HomeAssistantError):

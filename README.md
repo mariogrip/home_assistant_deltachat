@@ -12,9 +12,9 @@ This integration is inspired by the Delta Chat integration that [@MichaelBitard]
 
 During setup, the integration creates a Delta Chat bot account on a chatmail relay (default `nine.testrun.org`). While Home Assistant runs, the bot stays connected, so it can handle invites and report whether each message was delivered.
 
-Each recipient you add becomes a `notify` entity, such as `notify.delta_chat_alice`. Calling `notify.send_message` on that entity sends an end-to-end encrypted message from the bot to that recipient. If you set a title, it's sent as the first line of the message.
+Recipients are people who joined the bot by scanning its invite QR code in Delta Chat. You pick them by name, so you don't need to know their Delta Chat address. Each recipient becomes a `notify` entity, such as `notify.delta_chat_alice`. Calling `notify.send_message` on that entity sends an end-to-end encrypted message from the bot to that recipient. If you set a title, it's sent as the first line of the message.
 
-Recipients must be **contacts of the bot** before they can receive messages. Open the bot's invite link (`https://i.delta.chat/...`) in Delta Chat, or scan its QR code. The link is shown during setup and when you reconfigure the integration. If you open it on a computer, the page shows a QR code that you can scan with your phone. If a recipient isn't a contact yet, the action fails with an error saying so.
+When someone joins, Home Assistant shows a notification. People who join are never added as recipients automatically, so a leaked invite can't be used to read your notifications.
 
 The bot's account data is stored in `<config>/delta_chat/`. It's deleted when you remove the integration.
 
@@ -33,10 +33,10 @@ Copy `custom_components/delta_chat` into your Home Assistant `config/custom_comp
 
 1. Go to **Settings → Devices & services → Add integration** and pick **Delta Chat**.
 2. Enter the relay. Keep the default unless you run your own.
-3. Open the invite link that's shown, from each recipient's Delta Chat app.
-4. Add one or more recipient addresses. Tick **Add another recipient** to add more.
+3. Scan the QR code that's shown in Delta Chat on each phone that should get notifications.
+4. On the Delta Chat integration page, choose **Add recipient** and pick a person from the list. The QR code is shown there too, so you can invite more people later.
 
-To add or remove recipients later, use **Reconfigure** on the integration entry.
+To remove a recipient, delete it from the integration page.
 
 ## Example
 
@@ -52,6 +52,7 @@ data:
 ## Known limitations
 
 - Only one Delta Chat bot can be set up per Home Assistant instance.
+- Requires Home Assistant 2025.3 or newer.
 - If delivery isn't confirmed within 60 seconds, the action returns without an error. The message stays queued and the bot keeps retrying.
 - The bot only sends messages. Replies to it are ignored.
 

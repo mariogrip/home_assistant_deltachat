@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from homeassistant.components.notify import NotifyEntity
-from homeassistant.const import CONF_EMAIL
+from homeassistant.const import CONF_EMAIL, CONF_NAME
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import DeltaChatConfigEntry
-from .const import DOMAIN, SEND_TIMEOUT
+from .const import DOMAIN, SEND_TIMEOUT, SUBENTRY_RECIPIENT
 
 
 async def async_setup_entry(
@@ -17,11 +17,18 @@ async def async_setup_entry(
     config_entry: DeltaChatConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up DeltaChat notify."""
-    async_add_entities(
-        DeltaChatNotify(config_entry, recipient["email"], recipient["name"])
-        for recipient in config_entry.data[CONF_EMAIL]
-    )
+    """Set up a notify entity for each recipient."""
+    for subentry in config_entry.subentries.values():
+        if subentry.subentry_type != SUBENTRY_RECIPIENT:
+            continue
+        async_add_entities(
+            [
+                DeltaChatNotify(
+                    config_entry, subentry.data[CONF_EMAIL], subentry.data[CONF_NAME]
+                )
+            ],
+            config_subentry_id=subentry.subentry_id,
+        )
 
 
 class DeltaChatNotify(NotifyEntity):

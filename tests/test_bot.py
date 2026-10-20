@@ -9,6 +9,7 @@ from deltachat2._utils import to_attrdict
 
 from custom_components.delta_chat.bot import (
     ConfigurationFailed,
+    Contact,
     ContactNotFound,
     DeltaChatClient,
     SendFailed,
@@ -158,3 +159,28 @@ def test_real_core_crash(tmp_path) -> None:
     with pytest.raises(JsonRpcError):
         client.rpc.get_all_account_ids()
     client.close()
+
+
+def test_get_contacts(client: DeltaChatClient) -> None:
+    """Test contacts are returned with their display name."""
+    client.rpc.get_contacts.return_value = to_attrdict(
+        [{"id": 10, "address": "alice@example.org", "displayName": "Alice"}]
+    )
+    assert client.get_contacts(1) == [Contact("alice@example.org", "Alice")]
+    client.rpc.get_contacts.assert_called_once_with(1, 0, "")
+
+
+def test_event_loop_reports_joined(client: DeltaChatClient) -> None:
+    """Test on_joined is called with the contact that finished joining."""
+    on_joined = MagicMock()
+    client._on_joined = on_joined
+    client.rpc.get_contact.return_value = to_attrdict(
+        {"id": 10, "address": "carol@example.org", "displayName": "Carol"}
+    )
+    _run_events(
+        client,
+        _event("SecurejoinInviterProgress", contactId=10, progress=400),
+        _event("SecurejoinInviterProgress", contactId=10, progress=1000),
+    )
+    on_joined.assert_called_once_with(Contact("carol@example.org", "Carol"))
+    client.rpc.get_contact.assert_called_once_with(1, 10)

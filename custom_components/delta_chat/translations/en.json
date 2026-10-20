@@ -8,36 +8,45 @@
           "relay": "Relay"
         }
       },
-      "email": {
-        "title": "Recipients",
-        "description": "Each recipient must open the bot's invite link in Delta Chat before they can receive messages:\n\n{invite}\n\nAdd the Delta Chat address to send notifications to.",
+      "invite": {
+        "title": "Invite people",
+        "description": "Scan this QR code in Delta Chat on each phone that should get notifications, or open {invite}\n\nOnce someone has joined, add them on the integration page with **Add recipient**.",
         "data": {
-          "email": "Email",
-          "name": "Name",
-          "add another": "Add another recipient"
-        }
-      },
-      "reconfigure": {
-        "title": "Recipients",
-        "description": "Bot invite link:\n\n{invite}\n\nUntick recipients to remove them, or enter an address to add one.",
-        "data": {
-          "recipients": "Recipients",
-          "email": "Email",
-          "name": "Name",
-          "add another": "Add another recipient"
+          "invite": "Bot invite"
         }
       }
     },
     "error": {
       "cannot_connect": "Could not create an account on the relay",
-      "unknown": "Unexpected error",
-      "invalid_email": "Invalid address",
-      "already_added": "This recipient is already added"
+      "unknown": "Unexpected error"
     },
     "abort": {
       "already_configured": "Delta Chat is already configured",
-      "single_instance_allowed": "Delta Chat is already configured",
-      "reconfigure_successful": "Re-configuration was successful"
+      "single_instance_allowed": "Delta Chat is already configured"
+    }
+  },
+  "config_subentries": {
+    "recipient": {
+      "entry_type": "Recipient",
+      "initiate_flow": {
+        "user": "Add recipient"
+      },
+      "step": {
+        "user": {
+          "title": "Add recipient",
+          "description": "Scan this QR code in Delta Chat on the recipient's phone, or open {invite}\n\nThen pick them below. If they're not listed yet, wait a few seconds and submit again.",
+          "data": {
+            "invite": "Bot invite",
+            "contact": "Recipient"
+          }
+        }
+      },
+      "error": {
+        "no_contacts": "Nobody new has joined yet. Scan the QR code first."
+      },
+      "abort": {
+        "not_loaded": "The Delta Chat integration must be loaded to add recipients"
+      }
     }
   }
 }

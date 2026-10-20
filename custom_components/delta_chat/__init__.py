@@ -5,13 +5,13 @@ from __future__ import annotations
 import shutil
 from dataclasses import dataclass
 
+from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_EMAIL, Platform
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
-from homeassistant.helpers import entity_registry as er
 
-from .bot import DeltaChatClient
+from .bot import Contact, DeltaChatClient
 from .const import CONF_ACCOUNT_ID, DOMAIN
 
 _PLATFORMS: list[Platform] = [Platform.NOTIFY]
@@ -30,11 +30,16 @@ type DeltaChatConfigEntry = ConfigEntry[DeltaChatData]
 
 async def async_setup_entry(hass: HomeAssistant, entry: DeltaChatConfigEntry) -> bool:
     """Set up Delta Chat from a config entry."""
+
+    def on_joined(contact: Contact) -> None:
+        hass.loop.call_soon_threadsafe(_notify_joined, hass, contact)
+
     client = DeltaChatClient(
         hass.config.path(DOMAIN),
         on_died=lambda: hass.loop.call_soon_threadsafe(
             hass.config_entries.async_schedule_reload, entry.entry_id
         ),
+        on_joined=on_joined,
     )
     try:
         await hass.async_add_executor_job(client.start)
@@ -43,47 +48,39 @@ async def async_setup_entry(hass: HomeAssistant, entry: DeltaChatConfigEntry) ->
         raise ConfigEntryNotReady(f"Could not start Delta Chat: {ex}") from ex
 
     try:
-        account_id = await _async_get_account_id(hass, entry, client)
+        account_id = entry.data[CONF_ACCOUNT_ID]
+        if not await hass.async_add_executor_job(client.is_configured, account_id):
+            raise ConfigEntryError(
+                "The Delta Chat bot account is missing, "
+                "remove and re-add the integration"
+            )
         await hass.async_add_executor_job(client.start_account, account_id)
     except BaseException:
         await hass.async_add_executor_job(client.close)
         raise
 
     entry.runtime_data = DeltaChatData(client, account_id)
-    _remove_stale_entities(hass, entry)
+    # Adding or removing a recipient updates the entry; reload to apply it.
+    entry.async_on_unload(entry.add_update_listener(_async_reload))
     await hass.config_entries.async_forward_entry_setups(entry, _PLATFORMS)
     return True
 
 
-async def _async_get_account_id(
-    hass: HomeAssistant, entry: DeltaChatConfigEntry, client: DeltaChatClient
-) -> int:
-    """Return the entry's bot account."""
-    account_id = entry.data.get(CONF_ACCOUNT_ID)
-    if account_id is None:
-        # Entries created before the account id was stored used the first
-        # configured account.
-        account_id = await hass.async_add_executor_job(client.first_configured_account)
-        if account_id is not None:
-            hass.config_entries.async_update_entry(
-                entry, data={**entry.data, CONF_ACCOUNT_ID: account_id}
-            )
-    if account_id is None or not await hass.async_add_executor_job(
-        client.is_configured, account_id
-    ):
-        raise ConfigEntryError(
-            "The Delta Chat bot account is missing, remove and re-add the integration"
-        )
-    return account_id
+def _notify_joined(hass: HomeAssistant, contact: Contact) -> None:
+    """Tell the user that someone can now be added as a recipient."""
+    persistent_notification.async_create(
+        hass,
+        f"**{contact.name}** ({contact.address}) joined the Delta Chat bot. "
+        "To send them notifications, open the "
+        "[Delta Chat integration](/config/integrations/integration/delta_chat) "
+        "and choose **Add recipient**.",
+        title="Delta Chat",
+        notification_id=f"{DOMAIN}_joined_{contact.address}",
+    )
 
 
-def _remove_stale_entities(hass: HomeAssistant, entry: DeltaChatConfigEntry) -> None:
-    """Remove entities of recipients that are no longer configured."""
-    recipients = {recipient["email"] for recipient in entry.data[CONF_EMAIL]}
-    registry = er.async_get(hass)
-    for entity in er.async_entries_for_config_entry(registry, entry.entry_id):
-        if entity.unique_id not in recipients:
-            registry.async_remove(entity.entity_id)
+async def _async_reload(hass: HomeAssistant, entry: DeltaChatConfigEntry) -> None:
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: DeltaChatConfigEntry) -> bool:

@@ -4,15 +4,16 @@ from collections.abc import Generator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from homeassistant.const import CONF_EMAIL
+from homeassistant.config_entries import ConfigSubentryData
+from homeassistant.const import CONF_EMAIL, CONF_NAME
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.delta_chat.const import (
     CONF_ACCOUNT_ID,
     CONF_DELTACHAT_RELAY,
-    CONF_INVITE,
     DEFAULT_RELAY,
     DOMAIN,
+    SUBENTRY_RECIPIENT,
 )
 
 INVITE = "https://i.delta.chat/#ABCDEF"
@@ -41,7 +42,8 @@ def mock_client() -> Generator[MagicMock]:
     ) as client_cls:
         client = client_cls.return_value
         client.is_configured.return_value = True
-        client.first_configured_account.return_value = 1
+        client.get_invite.return_value = INVITE
+        client.get_contacts.return_value = []
         yield client
 
 
@@ -52,13 +54,17 @@ def config_entry() -> MockConfigEntry:
         domain=DOMAIN,
         unique_id=DOMAIN,
         title=f"Delta Chat ({BOT_ADDRESS})",
-        data={
-            CONF_DELTACHAT_RELAY: DEFAULT_RELAY,
-            CONF_ACCOUNT_ID: 1,
-            CONF_INVITE: INVITE,
-            CONF_EMAIL: [
-                {"email": "alice@example.org", "name": "Alice"},
-                {"email": "bob@example.org", "name": "Bob"},
-            ],
-        },
+        data={CONF_DELTACHAT_RELAY: DEFAULT_RELAY, CONF_ACCOUNT_ID: 1},
+        subentries_data=[
+            ConfigSubentryData(
+                subentry_type=SUBENTRY_RECIPIENT,
+                title=name,
+                unique_id=email,
+                data={CONF_EMAIL: email, CONF_NAME: name},
+            )
+            for email, name in (
+                ("alice@example.org", "Alice"),
+                ("bob@example.org", "Bob"),
+            )
+        ],
     )

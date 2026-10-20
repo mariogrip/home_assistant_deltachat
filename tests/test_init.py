@@ -1,14 +1,14 @@
 """Test the Delta Chat setup."""
 
 import os
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.delta_chat.const import CONF_ACCOUNT_ID, DOMAIN
+from custom_components.delta_chat.bot import Contact
+from custom_components.delta_chat.const import DOMAIN
 
 
 async def test_setup_and_unload(
@@ -52,39 +52,46 @@ async def test_setup_account_missing(
     mock_client.close.assert_called_once()
 
 
-async def test_setup_migrates_account_id(
+async def test_joined_notification(
     hass: HomeAssistant, config_entry: MockConfigEntry, mock_client: MagicMock
 ) -> None:
-    """Test entries without an account id use the first configured account."""
-    data = dict(config_entry.data)
-    del data[CONF_ACCOUNT_ID]
-    entry = MockConfigEntry(domain=DOMAIN, unique_id=DOMAIN, data=data)
-    entry.add_to_hass(hass)
-    mock_client.first_configured_account.return_value = 3
-
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    assert entry.data[CONF_ACCOUNT_ID] == 3
-    mock_client.start_account.assert_called_once_with(3)
-
-
-async def test_stale_entities_removed(
-    hass: HomeAssistant, config_entry: MockConfigEntry, mock_client: MagicMock
-) -> None:
-    """Test entities of removed recipients are removed."""
+    """Test a notification is shown when someone joins the bot."""
     config_entry.add_to_hass(hass)
-    registry = er.async_get(hass)
-    registry.async_get_or_create(
-        "notify", DOMAIN, "gone@example.org", config_entry=config_entry
+    with patch("custom_components.delta_chat.DeltaChatClient") as client_cls:
+        client_cls.return_value = mock_client
+        assert await hass.config_entries.async_setup(config_entry.entry_id)
+    on_joined = client_cls.call_args.kwargs["on_joined"]
+
+    with patch(
+        "custom_components.delta_chat.persistent_notification.async_create"
+    ) as create:
+        await hass.async_add_executor_job(
+            on_joined, Contact("carol@example.org", "Carol")
+        )
+        await hass.async_block_till_done()
+
+    create.assert_called_once()
+    assert "**Carol** (carol@example.org)" in create.call_args.args[1]
+    assert create.call_args.kwargs["notification_id"] == (
+        "delta_chat_joined_carol@example.org"
     )
 
+
+async def test_removing_recipient_removes_entity(
+    hass: HomeAssistant, config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    """Test deleting a recipient removes its entity."""
+    config_entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(config_entry.entry_id)
     await hass.async_block_till_done()
+    assert hass.states.get("notify.delta_chat_bob") is not None
 
-    unique_ids = {
-        entity.unique_id
-        for entity in er.async_entries_for_config_entry(registry, config_entry.entry_id)
-    }
-    assert unique_ids == {"alice@example.org", "bob@example.org"}
+    bob = next(s for s in config_entry.subentries.values() if s.title == "Bob")
+    hass.config_entries.async_remove_subentry(config_entry, bob.subentry_id)
+    await hass.async_block_till_done()
+
+    assert hass.states.get("notify.delta_chat_bob") is None
+    assert hass.states.get("notify.delta_chat_alice") is not None
 
 
 async def test_remove_entry_deletes_data(
