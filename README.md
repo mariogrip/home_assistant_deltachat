@@ -66,4 +66,4 @@ uv pip install -p .venv/bin/python -r requirements_test.txt
 
 ## License
 
-The code that inspired this integration was written for Home Assistant core, which is licensed under Apache-2.0.
+Apache-2.0, the same license as Home Assistant core. See [LICENSE](LICENSE).
