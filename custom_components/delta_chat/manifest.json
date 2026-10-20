@@ -10,5 +10,5 @@
   "issue_tracker": "https://github.com/mariogrip/home_assistant_deltachat/issues",
   "requirements": ["deltachat2==0.9.0", "deltachat-rpc-server==2.58.0"],
   "single_config_entry": true,
-  "version": "0.1.0"
+  "version": "0.1.1"
 }

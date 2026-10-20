@@ -12,7 +12,8 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
-          # Remove once an icon is added to home-assistant/brands.
+          # The icon ships in custom_components/delta_chat/brand/ instead of
+          # the home-assistant/brands repository.
           ignore: brands
 
   hassfest:

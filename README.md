@@ -52,7 +52,7 @@ data:
 ## Known limitations
 
 - Only one Delta Chat bot can be set up per Home Assistant instance.
-- Requires Home Assistant 2025.3 or newer.
+- Requires Home Assistant 2025.3 or newer. The integration's icon shows in Home Assistant 2026.3 and newer.
 - If delivery isn't confirmed within 60 seconds, the action returns without an error. The message stays queued and the bot keeps retrying.
 - The bot only sends messages. Replies to it are ignored.
 
