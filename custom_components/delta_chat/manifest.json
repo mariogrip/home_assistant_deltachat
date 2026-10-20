@@ -1,7 +1,6 @@
 {
   "domain": "delta_chat",
   "name": "Delta Chat",
-  "categories": ["messaging_notifications.chat_apps"],
   "codeowners": ["@mariogrip"],
   "config_flow": true,
   "dependencies": [],
