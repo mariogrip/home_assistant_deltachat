@@ -1,0 +1,3 @@
+pytest-homeassistant-custom-component
+deltachat2==0.9.0
+deltachat-rpc-server==2.58.0

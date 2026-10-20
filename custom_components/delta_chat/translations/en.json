@@ -1,0 +1,43 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Delta Chat relay",
+        "description": "Create a Delta Chat bot account on a chatmail relay. This can take a minute.",
+        "data": {
+          "relay": "Relay"
+        }
+      },
+      "email": {
+        "title": "Recipients",
+        "description": "Each recipient must open the bot's invite link in Delta Chat before they can receive messages:\n\n{invite}\n\nAdd the Delta Chat address to send notifications to.",
+        "data": {
+          "email": "Email",
+          "name": "Name",
+          "add another": "Add another recipient"
+        }
+      },
+      "reconfigure": {
+        "title": "Recipients",
+        "description": "Bot invite link:\n\n{invite}\n\nUntick recipients to remove them, or enter an address to add one.",
+        "data": {
+          "recipients": "Recipients",
+          "email": "Email",
+          "name": "Name",
+          "add another": "Add another recipient"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not create an account on the relay",
+      "unknown": "Unexpected error",
+      "invalid_email": "Invalid address",
+      "already_added": "This recipient is already added"
+    },
+    "abort": {
+      "already_configured": "Delta Chat is already configured",
+      "single_instance_allowed": "Delta Chat is already configured",
+      "reconfigure_successful": "Re-configuration was successful"
+    }
+  }
+}

@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+# bot account data created when running HA from this directory
+/delta_chat/
