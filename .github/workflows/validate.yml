@@ -12,9 +12,6 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
-          # The icon ships in custom_components/delta_chat/brand/ instead of
-          # the home-assistant/brands repository.
-          ignore: brands
 
   hassfest:
     runs-on: ubuntu-latest
