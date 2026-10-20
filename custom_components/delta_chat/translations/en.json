@@ -10,15 +10,18 @@
       },
       "invite": {
         "title": "Invite people",
-        "description": "Scan this QR code in Delta Chat on each phone that should get notifications, or open {invite}\n\nOnce someone has joined, add them on the integration page with **Add recipient**.",
+        "description": "Scan this QR code in Delta Chat on each phone that should get notifications, or open {invite}\n\nAfter scanning, submit to refresh the list, then pick the recipients. You can add more later with **Add recipient** on the integration page.",
         "data": {
-          "invite": "Bot invite"
+          "invite": "Bot invite",
+          "recipients": "Recipients",
+          "skip": "Finish without recipients"
         }
       }
     },
     "error": {
       "cannot_connect": "Could not create an account on the relay",
-      "unknown": "Unexpected error"
+      "unknown": "Unexpected error",
+      "no_contacts": "Nobody has joined yet. Scan the QR code, wait a few seconds and submit again, or tick “Finish without recipients”."
     },
     "abort": {
       "already_configured": "Delta Chat is already configured",

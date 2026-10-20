@@ -1,5 +1,6 @@
 """Test the Delta Chat config flow."""
 
+from collections.abc import Generator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -20,35 +21,115 @@ from custom_components.delta_chat.const import (
 
 from .conftest import BOT_ADDRESS, INVITE
 
-CREATE_ACCOUNT = "custom_components.delta_chat.config_flow._create_account"
+FLOW_CLIENT = "custom_components.delta_chat.config_flow.DeltaChatClient"
 
 
-async def test_form(hass: HomeAssistant, mock_setup_entry: AsyncMock) -> None:
-    """Test creating the bot and showing its invite."""
+@pytest.fixture
+def flow_client() -> Generator[MagicMock]:
+    """Mock the client the config flow runs during setup."""
+    with patch(FLOW_CLIENT, autospec=True) as client_cls:
+        client = client_cls.return_value
+        client.setup_account.return_value = 1
+        client.get_invite.return_value = INVITE
+        client.get_address.return_value = BOT_ADDRESS
+        client.get_contacts.return_value = []
+        yield client
+
+
+async def _start_flow(hass: HomeAssistant) -> dict:
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "user"
     assert result["errors"] == {}
+    return await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_DELTACHAT_RELAY: f" {DEFAULT_RELAY} "}
+    )
 
-    with patch(CREATE_ACCOUNT, return_value=(1, INVITE, BOT_ADDRESS)) as create:
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], {CONF_DELTACHAT_RELAY: f" {DEFAULT_RELAY} "}
-        )
-    create.assert_called_once_with(hass.config.path(DOMAIN), DEFAULT_RELAY)
 
+async def test_form(
+    hass: HomeAssistant, mock_setup_entry: AsyncMock, flow_client: MagicMock
+) -> None:
+    """Test creating the bot and picking a recipient who joined during setup."""
+    result = await _start_flow(hass)
+
+    flow_client.setup_account.assert_called_once_with(DEFAULT_RELAY)
+    # The bot is connected so people can join while the invite is shown.
+    flow_client.start_account.assert_called_once_with(1)
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "invite"
     assert result["description_placeholders"] == {"invite": INVITE}
+    assert "recipients" not in result["data_schema"].schema
 
+    # Submitting before anyone joined asks to scan first.
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+    assert result["errors"] == {"base": "no_contacts"}
+    flow_client.close.assert_not_called()
+
+    # Alice and Bob join; submitting again refreshes the list.
+    flow_client.get_contacts.return_value = [
+        Contact("alice@example.org", "Alice"),
+        Contact("bob@example.org", "Bob"),
+    ]
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {}
+    options = result["data_schema"].schema["recipients"].config["options"]
+    assert [option["label"] for option in options] == [
+        "Alice (alice@example.org)",
+        "Bob (bob@example.org)",
+    ]
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"recipients": ["alice@example.org"]}
+    )
     await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == f"Delta Chat ({BOT_ADDRESS})"
     assert result["data"] == {CONF_DELTACHAT_RELAY: DEFAULT_RELAY, CONF_ACCOUNT_ID: 1}
+    entry = result["result"]
+    assert [
+        (s.subentry_type, s.title, s.unique_id, dict(s.data))
+        for s in entry.subentries.values()
+    ] == [
+        (
+            SUBENTRY_RECIPIENT,
+            "Alice",
+            "alice@example.org",
+            {CONF_EMAIL: "alice@example.org", CONF_NAME: "Alice"},
+        )
+    ]
+    # Stopped before the entry starts its own client on the same data.
+    flow_client.close.assert_called_once()
     assert len(mock_setup_entry.mock_calls) == 1
+
+
+async def test_form_skip_recipients(
+    hass: HomeAssistant, mock_setup_entry: AsyncMock, flow_client: MagicMock
+) -> None:
+    """Test finishing setup without recipients."""
+    result = await _start_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"skip": True}
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert not result["result"].subentries
+    flow_client.close.assert_called_once()
+
+
+async def test_form_closed_stops_client(
+    hass: HomeAssistant, flow_client: MagicMock
+) -> None:
+    """Test closing the dialog during setup stops the bot."""
+    result = await _start_flow(hass)
+    hass.config_entries.flow.async_abort(result["flow_id"])
+    await hass.async_block_till_done()
+
+    flow_client.close.assert_called_once()
 
 
 @pytest.mark.parametrize(
@@ -58,26 +139,24 @@ async def test_form(hass: HomeAssistant, mock_setup_entry: AsyncMock) -> None:
 async def test_form_errors(
     hass: HomeAssistant,
     mock_setup_entry: AsyncMock,
+    flow_client: MagicMock,
     side_effect: Exception,
     error: str,
 ) -> None:
     """Test we handle account creation errors and can recover."""
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_USER}
-    )
-
-    with patch(CREATE_ACCOUNT, side_effect=side_effect):
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], {CONF_DELTACHAT_RELAY: DEFAULT_RELAY}
-        )
+    flow_client.setup_account.side_effect = side_effect
+    result = await _start_flow(hass)
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": error}
+    flow_client.close.assert_called_once()
 
-    with patch(CREATE_ACCOUNT, return_value=(1, INVITE, BOT_ADDRESS)):
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], {CONF_DELTACHAT_RELAY: DEFAULT_RELAY}
-        )
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+    flow_client.setup_account.side_effect = None
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_DELTACHAT_RELAY: DEFAULT_RELAY}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"skip": True}
+    )
     await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
@@ -85,18 +164,17 @@ async def test_form_errors(
 
 
 async def test_already_configured(
-    hass: HomeAssistant, config_entry: MockConfigEntry
+    hass: HomeAssistant, config_entry: MockConfigEntry, flow_client: MagicMock
 ) -> None:
     """Test a second setup aborts without creating an account."""
     config_entry.add_to_hass(hass)
 
-    with patch(CREATE_ACCOUNT) as create:
-        result = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": config_entries.SOURCE_USER}
-        )
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
 
     assert result["type"] is FlowResultType.ABORT
-    create.assert_not_called()
+    flow_client.setup_account.assert_not_called()
 
 
 async def _start_recipient_flow(

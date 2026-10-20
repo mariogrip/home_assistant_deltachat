@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from typing import Any
 
 import homeassistant.helpers.config_validation as cv
@@ -12,6 +13,7 @@ from homeassistant.config_entries import (
     ConfigEntryState,
     ConfigFlow,
     ConfigFlowResult,
+    ConfigSubentryData,
     ConfigSubentryFlow,
     SubentryFlowResult,
 )
@@ -26,7 +28,7 @@ from homeassistant.helpers.selector import (
     SelectSelectorConfig,
 )
 
-from .bot import ConfigurationFailed, DeltaChatClient
+from .bot import ConfigurationFailed, Contact, DeltaChatClient
 from .const import (
     CONF_ACCOUNT_ID,
     CONF_DELTACHAT_RELAY,
@@ -39,6 +41,8 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 CONF_CONTACT = "contact"
+CONF_RECIPIENTS = "recipients"
+CONF_SKIP = "skip"
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
@@ -47,15 +51,13 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 )
 
 
-def _create_account(data_dir: str, relay: str) -> tuple[int, str, str]:
-    """Create the bot account and return its id, invite link and address."""
-    client = DeltaChatClient(data_dir)
-    try:
-        client.start()
-        account_id = client.setup_account(relay)
-        return account_id, client.get_invite(account_id), client.get_address(account_id)
-    finally:
-        client.close()
+def _start_account(client: DeltaChatClient, relay: str) -> tuple[int, str, str]:
+    """Create and connect the bot account; return its id, invite and address."""
+    client.start()
+    account_id = client.setup_account(relay)
+    # Connect now, so people who scan the invite during setup can join.
+    client.start_account(account_id)
+    return account_id, client.get_invite(account_id), client.get_address(account_id)
 
 
 def _invite_field(invite: str) -> dict[vol.Marker, Any]:
@@ -71,6 +73,15 @@ def _invite_field(invite: str) -> dict[vol.Marker, Any]:
     }
 
 
+def _contact_options(contacts: Iterable[Contact]) -> list[SelectOptionDict]:
+    return [
+        SelectOptionDict(
+            value=contact.address, label=f"{contact.name} ({contact.address})"
+        )
+        for contact in contacts
+    ]
+
+
 class DeltaChatConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Delta Chat."""
 
@@ -79,6 +90,8 @@ class DeltaChatConfigFlow(ConfigFlow, domain=DOMAIN):
     data: dict[str, Any]
     address: str
     invite: str
+    # Runs from account creation until the entry is created or the flow closes.
+    client: DeltaChatClient | None = None
 
     @classmethod
     @callback
@@ -99,13 +112,14 @@ class DeltaChatConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         if user_input is not None:
             relay = user_input[CONF_DELTACHAT_RELAY].strip()
+            self.client = DeltaChatClient(self.hass.config.path(DOMAIN))
             try:
                 (
                     account_id,
                     self.invite,
                     self.address,
                 ) = await self.hass.async_add_executor_job(
-                    _create_account, self.hass.config.path(DOMAIN), relay
+                    _start_account, self.client, relay
                 )
             except ConfigurationFailed as err:
                 _LOGGER.warning("Could not create a Delta Chat account: %s", err)
@@ -113,6 +127,8 @@ class DeltaChatConfigFlow(ConfigFlow, domain=DOMAIN):
             except Exception:
                 _LOGGER.exception("Unexpected exception")
                 errors["base"] = "unknown"
+            if errors:
+                await self._async_close_client()
             else:
                 self.data = {CONF_DELTACHAT_RELAY: relay, CONF_ACCOUNT_ID: account_id}
                 return await self.async_step_invite()
@@ -124,17 +140,67 @@ class DeltaChatConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_invite(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Show the bot's invite, then create the entry."""
-        if user_input is not None:
-            return self.async_create_entry(
-                title=f"Delta Chat ({self.address})", data=self.data
+        """Show the bot's invite and pick recipients from who joined."""
+        assert self.client is not None
+        contacts = {
+            contact.address: contact
+            for contact in await self.hass.async_add_executor_job(
+                self.client.get_contacts, self.data[CONF_ACCOUNT_ID]
             )
+        }
 
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            selected = [
+                contacts[address]
+                for address in user_input.get(CONF_RECIPIENTS, [])
+                if address in contacts
+            ]
+            if selected or user_input.get(CONF_SKIP):
+                await self._async_close_client()
+                return self.async_create_entry(
+                    title=f"Delta Chat ({self.address})",
+                    data=self.data,
+                    subentries=[
+                        ConfigSubentryData(
+                            subentry_type=SUBENTRY_RECIPIENT,
+                            title=contact.name,
+                            unique_id=contact.address.lower(),
+                            data={CONF_EMAIL: contact.address, CONF_NAME: contact.name},
+                        )
+                        for contact in selected
+                    ],
+                )
+            # Submitting without a choice refreshes the list of who joined.
+            if not contacts:
+                errors["base"] = "no_contacts"
+
+        schema = _invite_field(self.invite)
+        if contacts:
+            schema[vol.Optional(CONF_RECIPIENTS)] = SelectSelector(
+                SelectSelectorConfig(
+                    options=_contact_options(contacts.values()), multiple=True
+                )
+            )
+        schema[vol.Optional(CONF_SKIP)] = cv.boolean
         return self.async_show_form(
             step_id="invite",
-            data_schema=vol.Schema(_invite_field(self.invite)),
+            data_schema=vol.Schema(schema),
+            errors=errors,
             description_placeholders={"invite": self.invite},
         )
+
+    async def _async_close_client(self) -> None:
+        if (client := self.client) is not None:
+            self.client = None
+            await self.hass.async_add_executor_job(client.close)
+
+    @callback
+    def async_remove(self) -> None:
+        """Stop the bot when the flow is closed before finishing."""
+        if (client := self.client) is not None:
+            self.client = None
+            self.hass.async_add_executor_job(client.close)
 
 
 class RecipientSubentryFlow(ConfigSubentryFlow):
@@ -180,15 +246,7 @@ class RecipientSubentryFlow(ConfigSubentryFlow):
         schema: dict[vol.Marker, Any] = _invite_field(invite)
         if contacts:
             schema[vol.Required(CONF_CONTACT)] = SelectSelector(
-                SelectSelectorConfig(
-                    options=[
-                        SelectOptionDict(
-                            value=contact.address,
-                            label=f"{contact.name} ({contact.address})",
-                        )
-                        for contact in contacts.values()
-                    ]
-                )
+                SelectSelectorConfig(options=_contact_options(contacts.values()))
             )
         return self.async_show_form(
             step_id="user",
