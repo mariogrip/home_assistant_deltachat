@@ -71,9 +71,35 @@ async def test_joined_notification(
         await hass.async_block_till_done()
 
     create.assert_called_once()
-    assert "**Carol** (carol@example.org)" in create.call_args.args[1]
+    assert r"**Carol** (carol\@example\.org)" in create.call_args.args[1]
     assert create.call_args.kwargs["notification_id"] == (
         "delta_chat_joined_carol@example.org"
+    )
+
+
+async def test_joined_notification_escapes_markdown(
+    hass: HomeAssistant, config_entry: MockConfigEntry, mock_client: MagicMock
+) -> None:
+    """Test a joiner cannot inject Markdown into the notification."""
+    config_entry.add_to_hass(hass)
+    with patch("custom_components.delta_chat.DeltaChatClient") as client_cls:
+        client_cls.return_value = mock_client
+        assert await hass.config_entries.async_setup(config_entry.entry_id)
+    on_joined = client_cls.call_args.kwargs["on_joined"]
+
+    with patch(
+        "custom_components.delta_chat.persistent_notification.async_create"
+    ) as create:
+        await hass.async_add_executor_job(
+            on_joined,
+            Contact("[x](https://evil.example)@example.org", "**Bob**\n# Hi <b>"),
+        )
+        await hass.async_block_till_done()
+
+    message = create.call_args.args[1]
+    assert message.startswith(
+        r"**\*\*Bob\*\* \# Hi \<b\>** "
+        r"(\[x\]\(https\:\/\/evil\.example\)\@example\.org) joined"
     )
 
 

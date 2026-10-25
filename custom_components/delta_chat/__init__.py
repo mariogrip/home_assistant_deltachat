@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 from dataclasses import dataclass
 
@@ -15,6 +16,9 @@ from .bot import Contact, DeltaChatClient
 from .const import CONF_ACCOUNT_ID, DOMAIN
 
 _PLATFORMS: list[Platform] = [Platform.NOTIFY]
+
+# Markdown lets a backslash make any ASCII punctuation literal.
+_MARKDOWN_SPECIAL = re.compile(r"([!-/:-@\[-`{-~])")
 
 
 @dataclass
@@ -68,15 +72,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: DeltaChatConfigEntry) ->
 
 def _notify_joined(hass: HomeAssistant, contact: Contact) -> None:
     """Tell the user that someone can now be added as a recipient."""
+    name = _escape_markdown(contact.name)
+    address = _escape_markdown(contact.address)
     persistent_notification.async_create(
         hass,
-        f"**{contact.name}** ({contact.address}) joined the Delta Chat bot. "
+        f"**{name}** ({address}) joined the Delta Chat bot. "
         "To send them notifications, open the "
         "[Delta Chat integration](/config/integrations/integration/delta_chat) "
         "and choose **Add recipient**.",
         title="Delta Chat",
         notification_id=f"{DOMAIN}_joined_{contact.address}",
     )
+
+
+def _escape_markdown(text: str) -> str:
+    """Make text set by a contact show up literally in Markdown."""
+    return _MARKDOWN_SPECIAL.sub(r"\\\1", " ".join(text.splitlines()))
 
 
 async def _async_reload(hass: HomeAssistant, entry: DeltaChatConfigEntry) -> None:
